@@ -1,0 +1,4 @@
+# Archivos que no queremos versionar
+__pycache__/
+*.pyc
+*.pyo

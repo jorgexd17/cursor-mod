@@ -1,245 +1,250 @@
-import tkinter as tk
-from tkinter import ttk
-import threading
+import ctypes
 import json
 import os
-from pathlib import Path
-from PIL import Image, ImageDraw
-import mouse
+import sys
+import threading
 import time
+from pathlib import Path
 
-# Crear directorio de config
-CONFIG_DIR = Path.home() / ".cursor_mod"
-CONFIG_DIR.mkdir(exist_ok=True)
-CURSOR_DIR = CONFIG_DIR / "cursors"
-CURSOR_DIR.mkdir(exist_ok=True)
+import tkinter as tk
+
+
+WINDOWS = sys.platform.startswith("win")
+CONFIG_DIR = Path.home() / "AppData" / "Roaming" / "cursor_mod"
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
-# Estilos de cursor predefinidos
-CURSOR_STYLES = {
+STYLES = {
     "default": {
-        "ring_size": 28,
-        "dot_size": 10,
-        "ring_color": (124, 58, 237),
-        "dot_color": (244, 114, 182),
-        "ring_width": 2,
+        "size": 26,
+        "dot_size": 8,
+        "ring_color": "#7c3aed",
+        "dot_color": "#f472b6",
+        "bg_color": "white",
         "glow": True,
-        "animation": False
+        "shape": "circle",
     },
     "crosshair": {
-        "ring_size": 32,
-        "dot_size": 8,
-        "ring_color": (14, 165, 233),
-        "dot_color": (125, 211, 252),
-        "ring_width": 2,
-        "shape": "square",
+        "size": 28,
+        "dot_size": 6,
+        "ring_color": "#38bdf8",
+        "dot_color": "#7dd3fc",
+        "bg_color": "white",
         "glow": True,
-        "animation": False
+        "shape": "crosshair",
     },
     "neon": {
-        "ring_size": 30,
+        "size": 30,
         "dot_size": 12,
-        "ring_color": (34, 197, 94),
-        "dot_color": (134, 239, 172),
-        "ring_width": 3,
+        "ring_color": "#22c55e",
+        "dot_color": "#86efac",
+        "bg_color": "white",
         "glow": True,
-        "animation": True
+        "shape": "circle",
     },
     "pixel": {
-        "ring_size": 24,
+        "size": 28,
         "dot_size": 6,
-        "ring_color": (250, 204, 21),
-        "dot_color": (253, 230, 138),
-        "ring_width": 2,
-        "shape": "square",
+        "ring_color": "#facc15",
+        "dot_color": "#fde68a",
+        "bg_color": "white",
         "glow": False,
-        "animation": False
+        "shape": "square",
     },
     "magic": {
-        "ring_size": 26,
-        "dot_size": 12,
-        "ring_color": (244, 114, 182),
-        "dot_color": (192, 132, 252),
-        "ring_width": 2,
+        "size": 30,
+        "dot_size": 10,
+        "ring_color": "#f472b6",
+        "dot_color": "#c084fc",
+        "bg_color": "white",
         "glow": True,
-        "animation": True,
-        "dashed": True
+        "shape": "circle",
     },
     "circle": {
-        "ring_size": 36,
+        "size": 38,
         "dot_size": 6,
-        "ring_color": (251, 113, 133),
-        "dot_color": (254, 205, 211),
-        "ring_width": 3,
+        "ring_color": "#fb7185",
+        "dot_color": "#fecdd3",
+        "bg_color": "white",
         "glow": True,
-        "animation": False
+        "shape": "circle",
     },
-    "retro": {
-        "ring_size": 20,
-        "dot_size": 4,
-        "ring_color": (255, 255, 255),
-        "dot_color": (0, 0, 0),
-        "ring_width": 1,
-        "shape": "square",
-        "glow": False,
-        "animation": False
-    }
 }
 
-class CursorModApp:
+
+def load_config():
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            style = data.get("style", "default")
+            if style in STYLES:
+                return style
+        except Exception:
+            pass
+    return "default"
+
+
+def save_config(style_name: str):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump({"style": style_name}, f, ensure_ascii=False, indent=2)
+
+
+class CursorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Cursor Mod - Personalización Global")
-        self.root.geometry("600x700")
-        self.root.resizable(False, False)
-        
-        # Configurar tema oscuro
-        self.root.configure(bg="#0b1020")
-        style = ttk.Style()
-        style.theme_use('clam')
-        style.configure('TLabel', background="#0b1020", foreground="#e5e7eb")
-        style.configure('TButton', background="#1e293b", foreground="#e5e7eb")
-        style.configure('TFrame', background="#0b1020")
-        
-        self.current_style = "default"
-        self.is_running = False
-        self.mouse_thread = None
-        
-        self.load_config()
-        self.create_ui()
-        self.start_cursor_tracking()
-        
-    def load_config(self):
-        if CONFIG_FILE.exists():
-            with open(CONFIG_FILE, 'r') as f:
-                config = json.load(f)
-                self.current_style = config.get('style', 'default')
-        else:
-            self.save_config()
-    
-    def save_config(self):
-        config = {'style': self.current_style}
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(config, f)
-    
-    def create_ui(self):
-        # Título
-        title = tk.Label(
-            self.root,
-            text="🎯 Cursor Mod",
-            font=("Arial", 24, "bold"),
-            bg="#0b1020",
-            fg="#e5e7eb"
+        self.root.withdraw()
+        self.style_name = load_config()
+        self.clicking = False
+        self.x = 0
+        self.y = 0
+        self.cursor_window = tk.Toplevel(self.root)
+        self.cursor_window.attributes("-topmost", True)
+        self.cursor_window.attributes("-fullscreen", True)
+        self.cursor_window.attributes("-transparentcolor", "white")
+        self.cursor_window.overrideredirect(True)
+        self.cursor_window.wm_attributes("-alpha", 1.0)
+        self.cursor_window.configure(bg="white")
+
+        self.canvas = tk.Canvas(
+            self.cursor_window,
+            width=self.root.winfo_screenwidth(),
+            height=self.root.winfo_screenheight(),
+            bg="white",
+            highlightthickness=0,
+            cursor="none",
         )
-        title.pack(pady=20)
-        
-        # Descripción
-        desc = tk.Label(
-            self.root,
-            text="Personaliza tu cursor en todo el ordenador",
-            font=("Arial", 10),
-            bg="#0b1020",
-            fg="#cbd5e1"
-        )
-        desc.pack()
-        
-        # Frame de estilos
-        styles_frame = tk.Frame(self.root, bg="#0b1020")
-        styles_frame.pack(pady=20, padx=20, fill="both", expand=True)
-        
-        # Crear botones para cada estilo
-        self.style_buttons = {}
-        for style_name in CURSOR_STYLES.keys():
-            btn = tk.Button(
-                styles_frame,
-                text=style_name.capitalize(),
-                command=lambda s=style_name: self.change_style(s),
-                bg="#1e293b",
-                fg="#e5e7eb",
-                activebackground="#334155",
-                activeforeground="#e5e7eb",
-                padx=12,
-                pady=10,
-                font=("Arial", 11, "bold"),
-                relief="solid",
-                bd=1,
-                cursor="arrow"
+        self.canvas.pack(fill="both", expand=True)
+
+        self.cursor_item = None
+        self.dot_item = None
+        self.bind_events()
+        self.apply_style(self.style_name)
+        self.position_cursor(0, 0)
+
+    def bind_events(self):
+        self.canvas.bind("<Motion>", self.on_move)
+        self.canvas.bind("<ButtonPress-1>", lambda e: self.set_clicking(True))
+        self.canvas.bind("<ButtonRelease-1>", lambda e: self.set_clicking(False))
+        self.root.bind("<KeyPress>", self.on_keypress)
+
+    def on_keypress(self, event):
+        key = event.keysym.lower()
+        if key == "escape":
+            self.close()
+            return
+        if key in {"1", "2", "3", "4", "5", "6"}:
+            names = list(STYLES.keys())
+            idx = int(key) - 1
+            if 0 <= idx < len(names):
+                self.apply_style(names[idx])
+
+    def on_move(self, event):
+        self.position_cursor(event.x, event.y)
+
+    def set_clicking(self, value):
+        self.clicking = value
+        self.redraw()
+
+    def position_cursor(self, x, y):
+        self.x = x
+        self.y = y
+        self.redraw()
+
+    def redraw(self):
+        style = STYLES[self.style_name]
+        size = style["size"]
+        dot_size = style["dot_size"]
+        ring_color = style["ring_color"]
+        dot_color = style["dot_color"]
+        glow = style["glow"]
+        shape = style["shape"]
+
+        if self.cursor_item is not None:
+            self.canvas.delete(self.cursor_item)
+        if self.dot_item is not None:
+            self.canvas.delete(self.dot_item)
+
+        if shape == "square":
+            self.cursor_item = self.canvas.create_rectangle(
+                self.x - size / 2,
+                self.y - size / 2,
+                self.x + size / 2,
+                self.y + size / 2,
+                width=2,
+                outline=ring_color,
+                fill="",
+                stipple="gray50" if glow else "",
             )
-            btn.pack(pady=8, fill="x")
-            self.style_buttons[style_name] = btn
-        
-        # Actualizar botón activo
-        self.update_active_button()
-        
-        # Frame inferior
-        bottom_frame = tk.Frame(self.root, bg="#0b1020")
-        bottom_frame.pack(pady=20, padx=20, fill="x")
-        
-        # Botón de prueba
-        test_btn = tk.Button(
-            bottom_frame,
-            text="🎮 Hacer prueba (5 segundos)",
-            command=self.test_cursor,
-            bg="#7c3aed",
-            fg="white",
-            activebackground="#6d28d9",
-            padx=12,
-            pady=10,
-            font=("Arial", 11, "bold"),
-            relief="solid",
-            bd=1,
-            cursor="arrow"
+        elif shape == "crosshair":
+            self.cursor_item = self.canvas.create_line(
+                self.x - size, self.y, self.x + size, self.y,
+                fill=ring_color, width=2
+            )
+            self.canvas.create_line(
+                self.x, self.y - size, self.x, self.y + size,
+                fill=ring_color, width=2
+            )
+        else:
+            self.cursor_item = self.canvas.create_oval(
+                self.x - size / 2,
+                self.y - size / 2,
+                self.x + size / 2,
+                self.y + size / 2,
+                width=2,
+                outline=ring_color,
+                fill="",
+                stipple="gray50" if glow else "",
+            )
+
+        if self.clicking:
+            dot_size = max(4, dot_size - 2)
+
+        self.dot_item = self.canvas.create_oval(
+            self.x - dot_size / 2,
+            self.y - dot_size / 2,
+            self.x + dot_size / 2,
+            self.y + dot_size / 2,
+            fill=dot_color,
+            outline="",
         )
-        test_btn.pack(pady=10, fill="x")
-        
-        # Estado
-        self.status_label = tk.Label(
-            bottom_frame,
-            text="✅ Cursor activo",
-            font=("Arial", 10),
-            bg="#0b1020",
-            fg="#22c55e"
-        )
-        self.status_label.pack()
-    
-    def update_active_button(self):
-        for style_name, btn in self.style_buttons.items():
-            if style_name == self.current_style:
-                btn.config(bg="#7c3aed", fg="white")
-            else:
-                btn.config(bg="#1e293b", fg="#e5e7eb")
-    
-    def change_style(self, style_name):
-        self.current_style = style_name
-        self.save_config()
-        self.update_active_button()
-        self.status_label.config(text=f"✅ Estilo cambiado a {style_name.capitalize()}")
-        self.root.after(2000, lambda: self.status_label.config(text="✅ Cursor activo"))
-    
-    def test_cursor(self):
-        self.status_label.config(text="🔄 Probando cursor...", fg="#f59e0b")
-        self.root.after(5000, lambda: self.status_label.config(text="✅ Cursor activo", fg="#22c55e"))
-    
-    def start_cursor_tracking(self):
-        self.is_running = True
-        self.mouse_thread = threading.Thread(target=self.track_cursor, daemon=True)
-        self.mouse_thread.start()
-    
-    def track_cursor(self):
-        # Este es donde iría la lógica de rastreo del cursor global
-        # Por ahora, simplemente mantenemos el hilo activo
-        while self.is_running:
-            time.sleep(0.1)
-    
-    def on_closing(self):
-        self.is_running = False
+
+    def apply_style(self, style_name: str):
+        self.style_name = style_name
+        save_config(style_name)
+        self.redraw()
+
+    def close(self):
+        if WINDOWS:
+            ctypes.windll.user32.ShowCursor(True)
         self.root.destroy()
 
+
+def hide_system_cursor():
+    if WINDOWS:
+        ctypes.windll.user32.ShowCursor(False)
+
+
 def main():
+    if not WINDOWS:
+        print("Esta versión está diseñada para Windows.")
+        return
+
     root = tk.Tk()
-    app = CursorModApp(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_closing)
-    root.mainloop()
+    root.attributes("-topmost", True)
+    root.attributes("-alpha", 0.0)
+    root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
+    root.overrideredirect(True)
+    root.config(cursor="none")
+    root.focus_set()
+    hide_system_cursor()
+
+    app = CursorApp(root)
+    try:
+        root.mainloop()
+    finally:
+        app.close()
+
 
 if __name__ == "__main__":
     main()
